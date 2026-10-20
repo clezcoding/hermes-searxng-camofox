@@ -2,10 +2,14 @@
 # Hermes + SearXNG + Camofox — Coolify deployment variant
 #
 # This relies on Coolify features instead of published ports:
-#   - SERVICE_URL_SEARXNG_8080 and SERVICE_HEX_64_SEARXNG are Coolify "magic"
-#     variables that Coolify generates for you (public URL + 64-char hex secret).
-#   - The Traefik/Authentik labels route services through Coolify's reverse proxy
-#     and SSO. Set HERMES_API_SERVER_KEY in the Coolify environment.
+#   - SERVICE_HEX_64_SEARXNG is a Coolify "magic" variable (64-char hex secret).
+#   - SearXNG, Valkey and Camofox are internal only (no domain, no host ports);
+#     Hermes reaches them by service name on the stack's private network.
+#   - hermes-dashboard gets a generated domain (SERVICE_URL_HERMES_DASHBOARD_9119)
+#     behind Traefik basic auth (labels below; Coolify escapes "$" in labels by default).
+#   - Required Coolify settings: enable "Preserve repository during deployment"
+#     (General > Build pipeline) so the bind-mounted SearXNG config files exist.
+#   - Set HERMES_API_SERVER_KEY and your LLM provider key in the Coolify environment.
 #
 # For a normal `docker compose up` on any host, use docker-compose.yml instead.
 # ──────────────────────────────────────────────────────────────────────────
@@ -19,10 +23,9 @@ services:
     expose:
       - '8080'
     environment:
-      - SERVICE_URL_SEARXNG_8080
       - SEARXNG_PORT=8080
       - SEARXNG_BIND_ADDRESS=0.0.0.0
-      - 'SEARXNG_BASE_URL=${SERVICE_URL_SEARXNG_8080}'
+      - 'SEARXNG_BASE_URL=http://searxng:8080'
       - 'SEARXNG_SECRET=${SERVICE_HEX_64_SEARXNG}'
       - 'SEARXNG_VALKEY_URL=valkey://valkey:6379/0'
       - SEARXNG_LIMITER=false
@@ -47,8 +50,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    labels:
-      - coolify.traefik.middlewares=authentik-auth@file
   valkey:
     image: 'docker.io/valkey/valkey:8-alpine'
     restart: unless-stopped
@@ -115,6 +116,11 @@ services:
       # Tool wiring. SEARXNG_URL / CAMOFOX_URL are the exact upstream env names.
       - 'SEARXNG_URL=http://searxng:8080'
       - 'CAMOFOX_URL=http://camofox:9377'
+      # LLM provider (not bundled). Set the key for your provider in Coolify;
+      # swap this variable name if you do not use OpenRouter.
+      - 'OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}'
+      # web_extract backend (Firecrawl is not bundled): URL of your own Firecrawl.
+      - 'FIRECRAWL_API_URL=${FIRECRAWL_API_URL:-}'
     shm_size: 1gb
     healthcheck:
       test:
@@ -133,11 +139,10 @@ services:
     command: 'dashboard --host 0.0.0.0 --port 9119 --no-open --insecure'
     expose:
       - '9119'
-    ports:
-      - '9119:9119'
     volumes:
       - 'hermes-data:/opt/data'
     environment:
+      - SERVICE_URL_HERMES_DASHBOARD_9119
       - 'GATEWAY_HEALTH_URL=http://hermes:8642'
       - GATEWAY_HEALTH_TIMEOUT=5
     healthcheck:
@@ -152,7 +157,8 @@ services:
     mem_reservation: 128m
     cpus: '0.5'
     labels:
-      - traefik.http.middlewares.authentik-auth@file
+      - 'traefik.http.middlewares.dashboard-auth.basicauth.users=admin:$2y$10$CvGjUx4754iT0imA/DNfK.7UIU/Y6MTPENcVq4O8678DFHbLsuJ2K'
+      - 'coolify.traefik.middlewares=dashboard-auth'
 volumes:
   hermes-data: null
   camofox-data: null
