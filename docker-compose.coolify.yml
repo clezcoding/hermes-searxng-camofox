@@ -6,9 +6,14 @@
 #   - SearXNG, Valkey and Camofox are internal only (no domain, no host ports);
 #     Hermes reaches them by service name on the stack's private network.
 #   - hermes-dashboard gets a generated domain (SERVICE_URL_HERMES_DASHBOARD_9119)
-#     behind Traefik basic auth (labels below; Coolify escapes "$" in labels by default).
-#   - Required Coolify settings: enable "Preserve repository during deployment"
-#     (General > Build pipeline) so the bind-mounted SearXNG config files exist.
+#     behind Traefik basic auth. Credentials come from the Coolify variable
+#     DASHBOARD_BASICAUTH_USERS = "user:bcrypt-hash" (create: htpasswd -nbB user 'pw').
+#   - Required Coolify settings:
+#       * General > Build pipeline: enable "Preserve repository during deployment"
+#         so the bind-mounted SearXNG config files exist.
+#       * Advanced: disable "Escape special characters in labels?" so the variable
+#         is expanded inside the label, and tick "Is Literal" on
+#         DASHBOARD_BASICAUTH_USERS so the "$" in the hash are kept as-is.
 #   - Set HERMES_API_SERVER_KEY and your LLM provider key in the Coolify environment.
 #
 # For a normal `docker compose up` on any host, use docker-compose.yml instead.
@@ -157,7 +162,7 @@ services:
     mem_reservation: 128m
     cpus: '0.5'
     labels:
-      - 'traefik.http.middlewares.dashboard-auth.basicauth.users=admin:$2y$10$CvGjUx4754iT0imA/DNfK.7UIU/Y6MTPENcVq4O8678DFHbLsuJ2K'
+      - 'traefik.http.middlewares.dashboard-auth.basicauth.users=${DASHBOARD_BASICAUTH_USERS:?Set DASHBOARD_BASICAUTH_USERS (user:bcrypt-hash) in Coolify}'
       - 'coolify.traefik.middlewares=dashboard-auth'
 volumes:
   hermes-data: null
